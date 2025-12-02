@@ -1,0 +1,61 @@
+{
+  "backend": "ibm_fez",
+  "canonical_circuit_sha256": "7bf339ad467911a940afdf85c969c8fe87654d9ea56ea1fabb3c1972a5b8d864",
+  "canonical_schema_version": 1,
+  "circuit_properties": {
+    "active_clbits": 3,
+    "active_qubits": 3,
+    "allocated_clbits": 3,
+    "allocated_qubits": 156,
+    "depth": 10,
+    "gate_breakdown": {
+      "barrier": 1,
+      "cz": 2,
+      "measure": 3,
+      "rz": 8,
+      "sx": 5
+    },
+    "num_gates": 19
+  },
+  "client_ip": "58.25.99.200",
+  "job_id": "random_job_id_2",
+  "result_status_code": 200,
+  "result_timestamp": "2026-07-11T14:28:00.303978",
+  "results": {
+    "num_qubits": 3,
+    "outcomes": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "probabilities": {
+      "000": 0.51171875,
+      "001": 0.005859375,
+      "010": 0.0029296875,
+      "011": 0.009765625,
+      "100": 0.0146484375,
+      "101": 0.0048828125,
+      "110": 0.0078125,
+      "111": 0.4423828125
+    },
+    "state_counts": {
+      "000": 524,
+      "001": 6,
+      "010": 3,
+      "011": 10,
+      "100": 15,
+      "101": 5,
+      "110": 8,
+      "111": 453
+    },
+    "total_shots": 1024
+  },
+  "results_captured": true,
+  "shots": 1024,
+  "timestamp": "2026-07-11T14:27:46.845215"
+}

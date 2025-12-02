@@ -1,0 +1,41 @@
+{
+  "backend": "ibm_fez",
+  "canonical_circuit_sha256": "4c8c754eec5b985ad9b59807a952c20bc400869edcd9368d053ac5295c94316f",
+  "canonical_schema_version": 1,
+  "circuit_properties": {
+    "active_clbits": 4,
+    "active_qubits": 4,
+    "allocated_clbits": 4,
+    "allocated_qubits": 156,
+    "depth": 439,
+    "gate_breakdown": {
+      "barrier": 7,
+      "cz": 113,
+      "measure": 4,
+      "rz": 194,
+      "sx": 255,
+      "x": 11
+    },
+    "num_gates": 584
+  },
+  "job_id": "random_job_id_6",
+  "measurement_results": {
+    "0000": 41,
+    "0001": 33,
+    "0010": 82,
+    "0011": 47,
+    "0100": 42,
+    "0101": 35,
+    "0110": 44,
+    "0111": 29,
+    "1000": 48,
+    "1001": 39,
+    "1010": 413,
+    "1011": 53,
+    "1100": 31,
+    "1101": 24,
+    "1110": 37,
+    "1111": 26
+  },
+  "shots": 1024
+}

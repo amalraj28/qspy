@@ -1,0 +1,28 @@
+{
+  "backend": "ibm_fez",
+  "canonical_circuit_sha256": "0806c6cc0348099387739469993bfa518b7e317fe55b06e1d70181ec30b2b9d0",
+  "canonical_schema_version": 1,
+  "circuit_properties": {
+    "active_clbits": 2,
+    "active_qubits": 2,
+    "allocated_clbits": 2,
+    "allocated_qubits": 156,
+    "depth": 7,
+    "gate_breakdown": {
+      "barrier": 1,
+      "cz": 1,
+      "measure": 2,
+      "rz": 5,
+      "sx": 3
+    },
+    "num_gates": 12
+  },
+  "job_id": "random_job_id_1",
+  "measurement_results": {
+    "00": 524,
+    "01": 11,
+    "10": 6,
+    "11": 483
+  },
+  "shots": 1024
+}

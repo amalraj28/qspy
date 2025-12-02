@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QLogger</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: white;
+            padding: 20px 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            color: #333;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-label {
+            font-size: 12px;
+            opacity: 0.9;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        .controls {
+            background: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 300px;
+            gap: 20px;
+        }
+
+        .jobs-panel {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            max-height: 800px;
+            overflow-y: auto;
+        }
+
+        .activity-panel {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            max-height: 800px;
+            overflow-y: auto;
+        }
+
+        .panel-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+        }
+
+        .job-card {
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            transition: all 0.3s;
+        }
+
+        .job-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 4px 8px rgba(102, 126, 234, 0.2);
+        }
+
+        .job-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .job-id {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #667eea;
+            font-weight: bold;
+        }
+
+        .job-status {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .status-completed {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-submitted {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status-results-only {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .job-meta {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .job-meta-item {
+            margin-bottom: 4px;
+        }
+
+        .job-section {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 8px;
+        }
+
+        .circuit-info,
+        .results-info {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+
+        .info-label {
+            color: #666;
+            font-weight: 500;
+        }
+
+        .info-value {
+            color: #333;
+            font-weight: 600;
+        }
+
+        .circuit-diagram {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 10px;
+            white-space: pre;
+            overflow-x: auto;
+            margin-top: 8px;
+        }
+
+        .gate-breakdown {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .gate-badge {
+            background: #667eea;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+        }
+
+        .state-counts {
+            margin-top: 8px;
+        }
+
+        .state-bar {
+            margin-bottom: 6px;
+        }
+
+        .state-label {
+            font-size: 11px;
+            color: #666;
+            margin-bottom: 2px;
+        }
+
+        .bar-container {
+            background: #e0e0e0;
+            height: 20px;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .bar-fill {
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            height: 100%;
+            display: flex;
+            align-items: center;
+            padding-left: 8px;
+            color: white;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        .activity-item {
+            padding: 12px;
+            margin-bottom: 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            border-left: 3px solid #667eea;
+        }
+
+        .activity-circuit {
+            background: #e8f4fd;
+        }
+
+        .activity-results {
+            background: #e8f5e9;
+        }
+
+        .activity-time {
+            color: #999;
+            font-size: 10px;
+            margin-bottom: 4px;
+        }
+
+        .activity-text {
+            color: #333;
+            margin-bottom: 4px;
+        }
+
+        .activity-details {
+            color: #666;
+            font-size: 11px;
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+            font-size: 14px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #667eea;
+            font-size: 14px;
+        }
+
+        @media (max-width: 1200px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>🔬 QLogger</h1>
+            <p class="subtitle">Real-time tracking of quantum circuits and measurement results</p>
+
+            <div class="stats">
+                <div class="stat-card">
+                    <div class="stat-label">Total Jobs Tracked</div>
+                    <div class="stat-value" id="stat-jobs">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Circuits Captured</div>
+                    <div class="stat-value" id="stat-circuits">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Results Captured</div>
+                    <div class="stat-value" id="stat-results">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Unique Clients</div>
+                    <div class="stat-value" id="stat-clients">0</div>
+                </div>
+            </div>
+        </header>
+
+        <div class="controls">
+            <div>
+                <button class="btn btn-success" id="refresh-toggle" onclick="toggleAutoRefresh()">
+                    ⏸️ Pause Auto-Refresh
+                </button>
+                <span style="color: #666; font-size: 14px; margin-left: 15px;">
+                    Status: <strong id="refresh-status">ON (every 2s)</strong>
+                </span>
+            </div>
+            <button class="btn btn-danger" onclick="clearData()">🗑️ Clear All Data</button>
+        </div>
+
+        <div class="main-content">
+            <div class="jobs-panel">
+                <h2 class="panel-title">📋 Quantum Jobs</h2>
+                <div id="jobs-container">
+                    <div class="loading">Loading jobs...</div>
+                </div>
+            </div>
+
+            <div class="activity-panel">
+                <h2 class="panel-title">⚡ Recent Activity</h2>
+                <div id="activity-container">
+                    <div class="loading">Loading activity...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Auto-refresh state
+        let autoRefreshEnabled = true;
+        let refreshInterval = null;
+
+        // Toggle auto-refresh
+        function toggleAutoRefresh() {
+            autoRefreshEnabled = !autoRefreshEnabled;
+            const button = document.getElementById('refresh-toggle');
+            const status = document.getElementById('refresh-status');
+
+            if (autoRefreshEnabled) {
+                button.textContent = '⏸️ Pause Auto-Refresh';
+                button.className = 'btn btn-success';
+                status.textContent = 'ON (every 2s)';
+                startAutoRefresh();
+            } else {
+                button.textContent = '▶️ Resume Auto-Refresh';
+                button.className = 'btn btn-secondary';
+                status.textContent = 'PAUSED';
+                stopAutoRefresh();
+            }
+        }
+
+        // Start auto-refresh
+        function startAutoRefresh() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+            refreshInterval = setInterval(() => {
+                if (autoRefreshEnabled) {
+                    fetchJobs();
+                    fetchActivity();
+                }
+            }, 2000);
+        }
+
+        // Stop auto-refresh
+        function stopAutoRefresh() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+                refreshInterval = null;
+            }
+        }
+
+        // Fetch and display jobs
+        async function fetchJobs() {
+            try {
+                const response = await fetch('/api/jobs');
+                const data = await response.json();
+
+                // Update stats
+                document.getElementById('stat-jobs').textContent = data.stats.total_jobs;
+                document.getElementById('stat-circuits').textContent = data.stats.total_circuits_captured;
+                document.getElementById('stat-results').textContent = data.stats.total_results_captured;
+                document.getElementById('stat-clients').textContent = data.stats.unique_clients.length;
+
+                // Display jobs
+                const container = document.getElementById('jobs-container');
+
+                if (data.jobs.length === 0) {
+                    container.innerHTML = '<div class="no-data">No quantum jobs captured yet. Waiting for traffic...</div>';
+                    return;
+                }
+
+                container.innerHTML = data.jobs.map(job => renderJob(job)).join('');
+
+            } catch (error) {
+                console.error('Error fetching jobs:', error);
+                document.getElementById('jobs-container').innerHTML = '<div class="no-data">Error loading jobs</div>';
+            }
+        }
+
+        // Render a single job card
+        function renderJob(job) {
+            const statusClass = `status-${job.status}`;
+            const statusText = job.status.replace('_', ' ').toUpperCase();
+
+            let html = `
+                <div class="job-card">
+                    <div class="job-header">
+                        <div class="job-id">🆔 ${job.job_id}</div>
+                        <div class="job-status ${statusClass}">${statusText}</div>
+                    </div>
+                    
+                    <div class="job-meta">
+                        <div class="job-meta-item">👤 Client: <strong>${job.client_ip}</strong></div>
+                        <div class="job-meta-item">👤 Name: <strong>${job.username}</strong></div>
+                        <div class="job-meta-item">👤 Email: <strong>${job.email}</strong></div>
+                        <div class="job-meta-item">🕐 Last updated: <strong>${new Date(job.last_updated).toLocaleString("en-GB", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric"
+            })}</strong></div>
+                        ${job.metadata.backend ? `<div class="job-meta-item">🖥️ Backend: <strong>${job.metadata.backend}</strong></div>` : ''}
+                        ${job.metadata.shots ? `<div class="job-meta-item">🎯 Shots: <strong>${job.metadata.shots}</strong></div>` : ''}
+                    </div>
+            `;
+
+            // Circuit section
+            if (job.circuit) {
+                html += `
+                    <div class="job-section">
+                        <div class="section-title">⚡ Quantum Circuit</div>
+                        <div class="circuit-info">
+                            ${renderCircuit(job.circuit)}
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Results section
+            if (job.results) {
+                html += `
+                    <div class="job-section">
+                        <div class="section-title">🔬 Measurement Results</div>
+                        <div class="results-info">
+                            ${renderResults(job.results)}
+                        </div>
+                    </div>
+                `;
+            }
+
+            html += '</div>';
+            return html;
+        }
+
+        // Render circuit information
+        function renderCircuit(circuit) {
+            if (circuit.error) {
+                return `<div style="color: #dc3545;">${circuit.error}</div>`;
+            }
+
+            let html = '';
+
+            if (circuit.num_qubits !== undefined) {
+                html += `
+                    <div class="info-row">
+                        <span class="info-label">Qubits:</span>
+                        <span class="info-value">${circuit.num_qubits}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Classical Bits:</span>
+                        <span class="info-value">${circuit.num_clbits || 0}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Circuit Depth:</span>
+                        <span class="info-value">${circuit.circuit_depth || 'N/A'}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Total Gates:</span>
+                        <span class="info-value">${circuit.num_gates || 'N/A'}</span>
+                    </div>
+                `;
+
+                if (circuit.gate_breakdown) {
+                    html += '<div style="margin-top: 10px;"><div class="info-label">Gates Used:</div><div class="gate-breakdown">';
+                    for (const [gate, count] of Object.entries(circuit.gate_breakdown)) {
+                        html += `<div class="gate-badge">${gate}: ${count}</div>`;
+                    }
+                    html += '</div></div>';
+                }
+
+                if (circuit.circuit_diagram && circuit.circuit_diagram !== 'Circuit diagram unavailable') {
+                    html += `<div class="circuit-diagram">${circuit.circuit_diagram}</div>`;
+                }
+            } else {
+                html += `<div>${circuit.message || JSON.stringify(circuit)}</div>`;
+            }
+
+            return html;
+        }
+
+        // Render results information
+        function renderResults(results) {
+            if (!results) return '<div>No results data</div>';
+
+            let html = `
+                <div class="info-row">
+                    <span class="info-label">Qubits:</span>
+                    <span class="info-value">${results.num_qubits}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Total Shots:</span>
+                    <span class="info-value">${results.total_shots}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Unique States:</span>
+                    <span class="info-value">${Object.keys(results.state_counts || {}).length}</span>
+                </div>
+            `;
+
+            if (results.state_counts) {
+                html += '<div style="margin-top: 10px;"><div class="info-label">State Distribution:</div><div class="state-counts">';
+
+                // Sort states by count
+                const sortedStates = Object.entries(results.state_counts)
+                    .sort(([, a], [, b]) => b - a)
+                    .slice(0, 5); // Show top 5
+
+                for (const [state, count] of sortedStates) {
+                    const percentage = ((count / results.total_shots) * 100).toFixed(1);
+                    html += `
+                        <div class="state-bar">
+                            <div class="state-label">|${state}⟩</div>
+                            <div class="bar-container">
+                                <div class="bar-fill" style="width: ${percentage}%">
+                                    ${count} (${percentage}%)
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                html += '</div></div>';
+            }
+
+            return html;
+        }
+
+        // Fetch and display activity
+        async function fetchActivity() {
+            try {
+                const response = await fetch('/api/activity');
+                const activities = await response.json();
+
+                const container = document.getElementById('activity-container');
+
+                if (activities.length === 0) {
+                    container.innerHTML = '<div class="no-data">No activity yet</div>';
+                    return;
+                }
+
+                container.innerHTML = activities.reverse().map(activity => {
+                    const isCircuit = activity.type === 'circuit_captured';
+                    const activityClass = isCircuit ? 'activity-circuit' : 'activity-results';
+                    const icon = isCircuit ? '⚡' : '🔬';
+                    const title = isCircuit ? 'Circuit Captured' : 'Results Received';
+
+                    let details = `Client: ${activity.client_ip}`;
+                    if (isCircuit && activity.backend) {
+                        details += ` | Backend: ${activity.backend} | Qubits: ${activity.num_qubits}`;
+                    } else if (!isCircuit && activity.total_shots) {
+                        details += ` | Shots: ${activity.total_shots} | States: ${activity.num_states}`;
+                    }
+
+                    return `
+                        <div class="activity-item ${activityClass}">
+                            <div class="activity-time">${new Date(activity.timestamp).toLocaleString("en-GB", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric"
+                    })}</div>
+                            <div class="activity-text">${icon} <strong>${title}</strong></div>
+                            <div class="activity-details">Job: ${activity.job_id}</div>
+                            <div class="activity-details">${details}</div>
+                        </div>
+                    `;
+                }).join('');
+
+            } catch (error) {
+                console.error('Error fetching activity:', error);
+            }
+        }
+
+        // Clear all data
+        async function clearData() {
+            if (!confirm('Are you sure you want to clear all captured data?')) {
+                return;
+            }
+
+            try {
+                await fetch('/api/clear', { method: 'POST' });
+                fetchJobs();
+                fetchActivity();
+            } catch (error) {
+                console.error('Error clearing data:', error);
+                alert('Failed to clear data');
+            }
+        }
+
+        // Initial load and start auto-refresh
+        fetchJobs();
+        fetchActivity();
+        startAutoRefresh();
+    </script>
+</body>
+
+</html>

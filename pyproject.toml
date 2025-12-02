@@ -1,0 +1,11 @@
+[project]
+name = "qspy-client"
+version = "0.1.0"
+description = "IBM Quantum workload used with the QSpy research prototype"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "python-dotenv>=1.2.1",
+    "qiskit>=2.3.0",
+    "qiskit-ibm-runtime>=0.45.1",
+]

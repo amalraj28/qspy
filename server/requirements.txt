@@ -1,0 +1,4 @@
+# Dependencies required by server/c2_server.py
+Flask>=3.1.0,<4
+qiskit>=2.3.0,<3
+waitress>=3.0.2,<4
