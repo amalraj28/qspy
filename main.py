@@ -1,4 +1,20 @@
 import socket
+import threading
+
+
+def forward_bytes(
+    source: socket.socket,
+    destination: socket.socket,
+):
+    try:
+        while True:
+            data = source.recv(4096)
+            if not data:
+                break
+
+            destination.sendall(data)
+    except:
+        pass
 
 
 TARGET_DOMAINS = {
@@ -25,17 +41,40 @@ while True:
     first_line = decoded_data.split("\n")[0]
     url = first_line.split(" ")[1]  # hostname:port
 
-    hostname = url.split(":")[0]  # hostname
+    hostname, port = url.split(":")  # (hostname, port)
 
     if hostname in TARGET_DOMAINS:
         print("Found target")
+        client_socket.send(
+            b"HTTP/1.1 200 Connection Established\r\n\r\n",
+        )
 
     else:
         print("Pass through")
-        
+        destination_socket = socket.create_connection((hostname, port))
 
-    # Client expects this response irrespective of whether request is intercepted or passed through
-    client_socket.send(
-        b"HTTP/1.1 200 Connection Established\r\n\r\n",
-    )
-    client_socket.close()
+        client_socket.send(
+            b"HTTP/1.1 200 Connection Established\r\n\r\n",
+        )
+
+        # Spin up and start two threads for bidirectional communication
+        request_thread = threading.Thread(
+            target=forward_bytes,
+            args=(
+                client_socket,
+                destination_socket,
+            ),
+            daemon=True,  # daemon thread, tied to the main script
+        )
+
+        response_thread = threading.Thread(
+            target=forward_bytes,
+            args=(
+                destination_socket,
+                client_socket,
+            ),
+            daemon=True,  # daemon thread, tied to the main script
+        )
+
+        request_thread.start()
+        response_thread.start()
