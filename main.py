@@ -1,187 +1,282 @@
+"""Small HTTP/1.1 debugging proxy with selective HTTPS interception."""
+import argparse
+import gzip
+import http.client
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import logging
+from pathlib import Path
+import select
 import socket
-import threading
-from generate_cert import generate_cert_files
 import ssl
+import threading
+from typing import cast
+from urllib.parse import urlsplit
+import zlib
+from certifi import where as requests_ca_bundle
+
+from generate_cert import CertificateAuthority
+
+TARGET_DOMAINS = {"example.com"}
+LOG = logging.getLogger("custom_mitmproxy")
+PRINT_LOCK = threading.Lock()
+HOP_HEADERS = {"connection", "proxy-connection", "proxy-authorization", "proxy-authenticate",
+               "keep-alive", "te", "trailer", "transfer-encoding", "upgrade"}
 
 
-def forward_bytes(
-    source: socket.socket,
-    destination: socket.socket,
-    label: str | None = None,
-):
+def normalize_host(host):
+    return host.rstrip(".").encode("idna").decode("ascii").lower()
+
+
+def log_message(label, url, first_line, headers, body):
+    """Decode a copy for display; forwarding retains the original content bytes."""
     try:
-        while True:
-            data = source.recv(4096)
-            if not data:
-                break
-
-            if label:
-                print(f"[{label}] = {data.decode("utf-8", errors="ignore")}")
-
-            destination.sendall(data)
-    except:
-        pass
-
-
-def handle_client_connection(client_socket: socket.socket):
-    is_intercept = False
-    try:
-        data = client_socket.recv(4096)
-        if not data:
-            return
-
-        decoded_data = data.decode(
-            encoding="utf-8",
-            errors="ignore",
-        )
-        print(decoded_data)
-
-        # First line is in the form --> CONNECT hostname:port HTTP/1.1\r\n
-        first_line = decoded_data.split("\n")[0]
-        url = first_line.split(" ")[1]  # hostname:port
-
-        hostname, port = url.split(":")  # (hostname, port)
-        port = int(port)
-
-        if hostname in TARGET_DOMAINS:
-            is_intercept = True
-            print("Found target")
-            client_socket.send(
-                b"HTTP/1.1 200 Connection Established\r\n\r\n",
-            )
-            # Always send the above acknowledgment first, since client is
-            # waiting for this after sending CONNECT request
-
-            generate_cert_files(hostname=hostname)
-            context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-            context.load_cert_chain(
-                certfile="tmp.crt",
-                keyfile="tmp.key",
-            )
-
-            tls_client_socket = context.wrap_socket(
-                client_socket,
-                server_side=True,
-            )
-
-            remote_raw = socket.create_connection((hostname, int(port)))
-            server_context = ssl._create_unverified_context()
-            tls_remote_socket = server_context.wrap_socket(
-                remote_raw,
-                server_hostname=hostname,
-            )
-
-            t1 = threading.Thread(
-                target=forward_bytes,
-                args=(
-                    tls_client_socket,
-                    tls_remote_socket,
-                    "API_REQUEST",
-                ),
-                daemon=True,
-            )
-
-            t2 = threading.Thread(
-                target=forward_bytes,
-                args=(
-                    tls_remote_socket,
-                    tls_client_socket,
-                    "API_RESPONSE",
-                ),
-                daemon=True,
-            )
-
-            t1.start()
-            t2.start()
-
-            # plaintext_request = tls_client_socket.recv(4096)
-            # print(f"Logged message : {plaintext_request.decode(errors="ignore")}")
-            # tls_remote_socket.sendall(plaintext_request)
-
-            # plaintext_response = tls_remote_socket.recv(4096)
-            # print(f"Logged response : {plaintext_response.decode(errors="ignore")}")
-
-            # tls_client_socket.sendall(plaintext_response)
-
-            # tls_client_socket.close()
-            # tls_remote_socket.close()
-
-        else:
-            print("Pass through")
-            destination_socket = socket.create_connection((hostname, port))
-
-            client_socket.send(
-                b"HTTP/1.1 200 Connection Established\r\n\r\n",
-            )
-
-            # Spin up and start two threads for bidirectional communication
-            request_thread = threading.Thread(
-                target=forward_bytes,
-                args=(
-                    client_socket,
-                    destination_socket,
-                ),
-                daemon=True,  # daemon thread, tied to the main script
-            )
-
-            response_thread = threading.Thread(
-                target=forward_bytes,
-                args=(
-                    destination_socket,
-                    client_socket,
-                ),
-                daemon=True,  # daemon thread, tied to the main script
-            )
-
-            request_thread.start()
-            response_thread.start()
-
-    except Exception as e:
-        print(f"Error handling connection: {e}")
-
-    finally:
-        if is_intercept:
-            try:
-                client_socket.close()
-            except:
-                pass
+        for encoding in reversed(headers.get("Content-Encoding", "").lower().split(",")):
+            if encoding.strip() == "gzip":
+                body = gzip.decompress(body)
+            elif encoding.strip() == "deflate":
+                try:
+                    body = zlib.decompress(body)
+                except zlib.error:
+                    body = zlib.decompress(body, -zlib.MAX_WBITS)
+            elif encoding.strip() not in ("", "identity"):
+                raise ValueError(f"unsupported content encoding: {encoding}")
+        charset = headers.get_content_charset() or "utf-8"
+        content = body.decode(charset, errors="replace")
+    except (ValueError, OSError, EOFError, LookupError, zlib.error) as exc:
+        content = f"[body could not be decoded: {exc}; {len(body)} bytes]"
+    with PRINT_LOCK:
+        LOG.info("\n=== %s %s ===\n%s\n%s\n%s\n", label, url, first_line,
+                 str(headers).rstrip(), content)
 
 
-TARGET_DOMAINS = {
-    "example.com",
-}
-
-server_socket = socket.socket(
-    socket.AF_INET,  # IPv4 addressing
-    socket.SOCK_STREAM,  # TCP Protocol
-)
-
-server_socket.bind(("127.0.0.1", 8888))
-
-server_socket.listen()
-server_socket.settimeout(1.0)
-print("MITM Proxy active on 127.0.0.1:8888...")
+def filtered_headers(headers):
+    excluded = HOP_HEADERS | {x.strip().lower() for x in headers.get("Connection", "").split(",")}
+    return [(k, v) for k, v in headers.items() if k.lower() not in excluded]
 
 
-try:
-    while True:
+def create_upstream_context(cafile=None):
+    """Trust platform roots plus Requests' public bundle and optional private roots."""
+    context = ssl.create_default_context()
+    context.load_verify_locations(cafile=requests_ca_bundle())
+    if cafile:
+        context.load_verify_locations(cafile=cafile)
+    context.set_alpn_protocols(["http/1.1"])
+    return context
+
+
+class ProxyServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(self, address, targets=None, cert_dir=".proxy-certs", upstream_context=None):
+        self.targets = {normalize_host(h) for h in (TARGET_DOMAINS if targets is None else targets)}
+        self.ca = CertificateAuthority(cert_dir)
+        self.upstream_context = upstream_context or create_upstream_context()
+        self.upstream_context.set_alpn_protocols(["http/1.1"])
+        super().__init__(address, ProxyHandler)
+
+
+class ProxyHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    timeout = 30
+    # Avoid buffered read-ahead swallowing the start of a CONNECT TLS handshake.
+    rbufsize = 0
+    tunnel = None
+
+    @property
+    def proxy_server(self) -> ProxyServer:
+        return cast(ProxyServer, self.server)
+
+    def finish(self):
         try:
-            client_socket, client_addr = server_socket.accept()
+            super().finish()
+        finally:
+            self.connection.close()
 
-        except socket.timeout:
-            continue
+    def do_CONNECT(self):
+        established = False
+        try:
+            authority = urlsplit("//" + self.path)
+            host, port = normalize_host(authority.hostname or ""), authority.port or 443
+            if not host or authority.path:
+                raise ValueError("Invalid CONNECT authority")
+            if host not in self.proxy_server.targets:
+                with socket.create_connection((host, port), timeout=30) as remote:
+                    self.send_response_only(200, "Connection Established")
+                    self.end_headers()
+                    established = True
+                    self.close_connection = True
+                    sockets = [self.connection, remote]
+                    while sockets:
+                        ready, _, _ = select.select(sockets, [], [], 30)
+                        if not ready:
+                            break
+                        for source in ready:
+                            dest = remote if source is self.connection else self.connection
+                            data = source.recv(65536)
+                            if data:
+                                dest.sendall(data)
+                            else:
+                                sockets.remove(source)
+                                dest.shutdown(socket.SHUT_WR)
+                return
+            cert, key = self.proxy_server.ca.generate_cert_files(host)
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
+            context.set_alpn_protocols(["http/1.1"])
+            context.load_cert_chain(cert, key)
+            self.send_response_only(200, "Connection Established")
+            self.end_headers()
+            established = True
+            self.connection = context.wrap_socket(self.connection, server_side=True)
+            self.rfile.close()
+            self.wfile.close()
+            self.rfile = self.connection.makefile("rb", self.rbufsize)
+            self.wfile = self.connection.makefile("wb", 0)
+            self.tunnel = (host, port)
+            self.close_connection = False
+        except (OSError, ValueError) as exc:
+            LOG.warning("CONNECT failed for %s: %s", self.path, exc)
+            self.close_connection = True
+            if not established:
+                self.send_error(502, "CONNECT failed")
 
-        worker = threading.Thread(
-            target=handle_client_connection,
-            args=(client_socket,),
-            daemon=True,
-        )
+    def read_body(self):
+        encoding = self.headers.get("Transfer-Encoding", "").lower()
+        if encoding:
+            if encoding != "chunked" or self.headers.get("Content-Length") is not None:
+                raise ValueError("Unsupported or ambiguous request framing")
+            chunks = []
+            while True:
+                line = self.rfile.readline(65537)
+                size = int(line.split(b";", 1)[0], 16)
+                if size < 0:
+                    raise ValueError("Invalid chunk size")
+                if size == 0:
+                    while True:
+                        trailer = self.rfile.readline(65537)
+                        if trailer == b"\r\n":
+                            return b"".join(chunks)
+                        if not trailer or len(trailer) > 65536:
+                            raise ValueError("Invalid chunk trailers")
+                chunks.append(self.read_exact(size))
+                if self.read_exact(2) != b"\r\n":
+                    raise ValueError("Invalid chunk terminator")
+        lengths = self.headers.get_all("Content-Length", [])
+        if len(lengths) > 1:
+            raise ValueError("Duplicate Content-Length")
+        length = int(lengths[0]) if lengths else 0
+        if length < 0:
+            raise ValueError("Negative Content-Length")
+        return self.read_exact(length)
 
-        worker.start()
+    def read_exact(self, size):
+        parts = []
+        while size:
+            part = self.rfile.read(min(size, 65536))
+            if not part:
+                raise ValueError("Incomplete request body")
+            parts.append(part)
+            size -= len(part)
+        return b"".join(parts)
+
+    def forward(self):
+        upstream = None
+        response_started = False
+        try:
+            if self.tunnel:
+                host, port = self.tunnel
+                scheme = "https"
+                path = self.path
+                if not path.startswith("/") and path != "*":
+                    raise ValueError("Expected an origin-form HTTPS request")
+            else:
+                url = urlsplit(self.path)
+                if url.scheme != "http" or not url.hostname or url.username or url.password or url.fragment:
+                    raise ValueError("Expected an absolute http:// proxy URL")
+                host, port = normalize_host(url.hostname), url.port or 80
+                scheme = "http"
+                path = (url.path or "/") + ("?" + url.query if url.query else "")
+            body = self.read_body()
+            display_url = f"{scheme}://{host}:{port}{path}"
+            target = host in self.proxy_server.targets
+            if target:
+                log_message("REQUEST", display_url, f"{self.command} {path} {self.request_version}", self.headers, body)
+            if scheme == "https":
+                upstream = http.client.HTTPSConnection(host, port, timeout=30, context=self.proxy_server.upstream_context)
+            else:
+                upstream = http.client.HTTPConnection(host, port, timeout=30)
+            upstream.putrequest(self.command, path, skip_host=True, skip_accept_encoding=True)
+            authority = f"[{host}]" if ":" in host else host
+            if port != (443 if scheme == "https" else 80):
+                authority += f":{port}"
+            upstream.putheader("Host", authority)
+            for key, value in filtered_headers(self.headers):
+                if key.lower() not in {"host", "content-length", "expect", "accept-encoding"}:
+                    upstream.putheader(key, value)
+            upstream.putheader("Accept-Encoding", "gzip, deflate")
+            if body or self.headers.get("Content-Length") is not None or self.headers.get("Transfer-Encoding"):
+                upstream.putheader("Content-Length", str(len(body)))
+            upstream.endheaders(body)
+            response = upstream.getresponse()
+            if response.status == 101:
+                raise ValueError("Protocol upgrades are not supported")
+            payload = response.read()
+            if target:
+                log_message("RESPONSE", display_url, f"HTTP/1.1 {response.status} {response.reason}", response.headers, payload)
+            self.send_response_only(response.status, response.reason)
+            response_started = True
+            for key, value in filtered_headers(response.headers):
+                if key.lower() != "content-length":
+                    self.send_header(key, value)
+            if self.command == "HEAD" or response.status == 304:
+                if response.headers.get("Content-Length") is not None:
+                    self.send_header("Content-Length", response.headers["Content-Length"])
+            elif response.status not in (204, 205) and response.status >= 200:
+                self.send_header("Content-Length", str(len(payload)))
+            elif response.status == 205:
+                self.send_header("Content-Length", "0")
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(payload)
+        except (ValueError, OSError, http.client.HTTPException) as exc:
+            LOG.warning("Proxy request failed: %s", exc)
+            if isinstance(exc, ssl.SSLCertVerificationError):
+                LOG.warning("Upstream TLS trust failed; for private/corporate issuers, supply their PEM CA bundle with --upstream-ca.")
+            self.close_connection = True
+            if not response_started:
+                self.send_error(502, "Proxy request failed")
+        finally:
+            if upstream:
+                upstream.close()
+
+    do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = do_OPTIONS = forward
 
 
-except KeyboardInterrupt:
-    print("\nShutting down proxy server!")
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8888)
+    parser.add_argument("--target", action="append", help="Exact domain to log (repeatable; overrides TARGET_DOMAINS)")
+    parser.add_argument("--cert-dir", default=str(Path(__file__).parent / ".proxy-certs"))
+    parser.add_argument("--upstream-ca", help="Additional PEM CA bundle for upstream servers (e.g. a corporate CA)")
+    parser.add_argument("--log-file", help="Also write plaintext traffic to this file")
+    args = parser.parse_args()
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    
+    if args.log_file:
+        handlers.append(logging.FileHandler(args.log_file, encoding="utf-8"))
+    
+    logging.basicConfig(level=logging.INFO, format="%(message)s", handlers=handlers)
+    
+    with ProxyServer((args.host, args.port), args.target, args.cert_dir,
+                     upstream_context=create_upstream_context(args.upstream_ca)) as server:
+        LOG.info("Proxy listening on %s:%s; targets: %s", *server.server_address, ", ".join(sorted(server.targets)))
+        LOG.info("Trust this CA in your client: %s", server.ca.cert_path)
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            LOG.info("Shutting down proxy")
 
-finally:
-    server_socket.close()
+if __name__ == "__main__":
+    main()

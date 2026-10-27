@@ -1,7 +1,7 @@
 [project]
 name = "custom-mitmproxy"
 version = "0.1.0"
-description = "Add your description here"
+description = "Selective HTTP and HTTPS plaintext debugging proxy"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
