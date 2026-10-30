@@ -25,6 +25,33 @@ Alternatively install the dependencies in `pyproject.toml` into your environment
 and run `python main.py`. The implementation uses the standard library for proxy
 networking and `cryptography` for certificates; it does not use mitmproxy.
 
+## Interactive traffic inspector
+
+Run in Windows Terminal, PowerShell, Command Prompt, or a Linux/macOS terminal:
+
+```sh
+uv sync
+```
+
+On Windows, this installs `windows-curses` automatically. Linux and macOS use
+Python's built-in `curses` module. Start the inspector in an interactive terminal:
+
+```sh
+uv run python main.py --interactive --target example.com --log-file traffic.log
+```
+
+The live list pairs each request with its response, showing method, URL, status,
+response size, and elapsed time. Pending requests and failures appear in the list.
+Use Up/Down to select a flow and Enter to inspect request and response headers,
+query arguments, URL-encoded form fields, and decoded bodies. JSON is indented.
+Repeated arguments and headers are preserved. Use Up/Down or Page Up/Page Down to
+scroll, Left/Right to pan long lines, Esc or `b` to return, and `q` to stop the proxy.
+
+Only configured target domains are captured. The latest 500 flows are retained in
+memory for this session. `--log-file` keeps the full plaintext traffic log while
+the terminal shows the inspector. Without `--interactive`, logging works as before.
+Multipart form bodies are shown as text rather than parsed fields.
+
 ## Trust the proxy CA
 
 On first startup the proxy creates `.proxy-certs/ca.crt` and its private key.

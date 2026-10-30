@@ -1,6 +1,5 @@
 """Small HTTP/1.1 debugging proxy with selective HTTPS interception."""
 import argparse
-import gzip
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import logging
@@ -9,9 +8,9 @@ import select
 import socket
 import ssl
 import threading
+import sys
 from typing import cast
 from urllib.parse import urlsplit
-import zlib
 from certifi import where as requests_ca_bundle
 
 from generate_cert import CertificateAuthority
@@ -29,21 +28,8 @@ def normalize_host(host):
 
 def log_message(label, url, first_line, headers, body):
     """Decode a copy for display; forwarding retains the original content bytes."""
-    try:
-        for encoding in reversed(headers.get("Content-Encoding", "").lower().split(",")):
-            if encoding.strip() == "gzip":
-                body = gzip.decompress(body)
-            elif encoding.strip() == "deflate":
-                try:
-                    body = zlib.decompress(body)
-                except zlib.error:
-                    body = zlib.decompress(body, -zlib.MAX_WBITS)
-            elif encoding.strip() not in ("", "identity"):
-                raise ValueError(f"unsupported content encoding: {encoding}")
-        charset = headers.get_content_charset() or "utf-8"
-        content = body.decode(charset, errors="replace")
-    except (ValueError, OSError, EOFError, LookupError, zlib.error) as exc:
-        content = f"[body could not be decoded: {exc}; {len(body)} bytes]"
+    from flow_viewer import decode_body
+    content = decode_body(headers, body)
     with PRINT_LOCK:
         LOG.info("\n=== %s %s ===\n%s\n%s\n%s\n", label, url, first_line,
                  str(headers).rstrip(), content)
@@ -68,7 +54,8 @@ class ProxyServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, address, targets=None, cert_dir=".proxy-certs", upstream_context=None):
+    def __init__(self, address, targets=None, cert_dir=".proxy-certs", upstream_context=None, flow_store=None):
+        self.flow_store = flow_store
         self.targets = {normalize_host(h) for h in (TARGET_DOMAINS if targets is None else targets)}
         self.ca = CertificateAuthority(cert_dir)
         self.upstream_context = upstream_context or create_upstream_context()
@@ -86,6 +73,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
     @property
     def proxy_server(self) -> ProxyServer:
         return cast(ProxyServer, self.server)
+
+    def log_message(self, format, *args):
+        if self.proxy_server.flow_store is None:
+            super().log_message(format, *args)
+        else:
+            LOG.info(format, *args)
 
     def finish(self):
         try:
@@ -183,6 +176,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
     def forward(self):
         upstream = None
         response_started = False
+        flow = None
         try:
             if self.tunnel:
                 host, port = self.tunnel
@@ -200,6 +194,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             body = self.read_body()
             display_url = f"{scheme}://{host}:{port}{path}"
             target = host in self.proxy_server.targets
+            if target and self.proxy_server.flow_store is not None:
+                flow = self.proxy_server.flow_store.start(self.command, display_url, self.request_version, self.headers, body)
             if target:
                 log_message("REQUEST", display_url, f"{self.command} {path} {self.request_version}", self.headers, body)
             if scheme == "https":
@@ -222,6 +218,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if response.status == 101:
                 raise ValueError("Protocol upgrades are not supported")
             payload = response.read()
+            if flow is not None:
+                self.proxy_server.flow_store.finish(flow, response, payload)
             if target:
                 log_message("RESPONSE", display_url, f"HTTP/1.1 {response.status} {response.reason}", response.headers, payload)
             self.send_response_only(response.status, response.reason)
@@ -240,6 +238,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if self.command != "HEAD":
                 self.wfile.write(payload)
         except (ValueError, OSError, http.client.HTTPException) as exc:
+            if flow is not None:
+                self.proxy_server.flow_store.finish(flow, error=exc)
             LOG.warning("Proxy request failed: %s", exc)
             if isinstance(exc, ssl.SSLCertVerificationError):
                 LOG.warning("Upstream TLS trust failed; for private/corporate issuers, supply their PEM CA bundle with --upstream-ca.")
@@ -261,8 +261,17 @@ def main():
     parser.add_argument("--cert-dir", default=str(Path(__file__).parent / ".proxy-certs"))
     parser.add_argument("--upstream-ca", help="Additional PEM CA bundle for upstream servers (e.g. a corporate CA)")
     parser.add_argument("--log-file", help="Also write plaintext traffic to this file")
+    parser.add_argument("--interactive", action="store_true", help="Open terminal flow inspector (Enter to inspect; q to quit)")
     args = parser.parse_args()
-    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    if args.interactive and (not sys.stdin.isatty() or not sys.stdout.isatty()):
+        parser.error("--interactive requires an interactive terminal")
+    if args.interactive:
+        try:
+            import curses  # Do not remove!
+            from flow_viewer import FlowStore, run_viewer
+        except ImportError:
+            parser.error("The terminal viewer requires curses. On Windows, run uv sync to install windows-curses.")
+    handlers: list[logging.Handler] = [logging.NullHandler()] if args.interactive else [logging.StreamHandler()]
     
     if args.log_file:
         handlers.append(logging.FileHandler(args.log_file, encoding="utf-8"))
@@ -270,11 +279,21 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s", handlers=handlers)
     
     with ProxyServer((args.host, args.port), args.target, args.cert_dir,
-                     upstream_context=create_upstream_context(args.upstream_ca)) as server:
+                     upstream_context=create_upstream_context(args.upstream_ca),
+                     flow_store=FlowStore() if args.interactive else None) as server:
         LOG.info("Proxy listening on %s:%s; targets: %s", *server.server_address, ", ".join(sorted(server.targets)))
         LOG.info("Trust this CA in your client: %s", server.ca.cert_path)
         try:
-            server.serve_forever()
+            if args.interactive:
+                worker = threading.Thread(target=server.serve_forever, daemon=True)
+                worker.start()
+                try:
+                    run_viewer(server.flow_store, server.server_address)
+                finally:
+                    server.shutdown()
+                    worker.join()
+            else:
+                server.serve_forever()
         except KeyboardInterrupt:
             LOG.info("Shutting down proxy")
 

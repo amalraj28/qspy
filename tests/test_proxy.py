@@ -76,6 +76,24 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(conn.getresponse().read(), b"hello world")
         self.assertIn("hello world", self.log.getvalue())
 
+    def test_flow_capture_and_filtering(self):
+        from flow_viewer import FlowStore, detail_lines
+        self.proxy.flow_store = FlowStore()
+        conn = self.connection()
+        for host in ("localhost", "127.0.0.1"):
+            conn.request("POST", f"http://{host}:{self.origin.server_port}/echo?a=1&a=2&empty=",
+                         body="field=hello+world&field=again",
+                         headers={"Content-Type": "application/x-www-form-urlencoded"})
+            self.assertEqual(conn.getresponse().read(), b"field=hello+world&field=again")
+        flows = self.proxy.flow_store.snapshot()
+        self.assertEqual(len(flows), 1)
+        flow = flows[0]
+        self.assertEqual(flow["status"], 200)
+        self.assertGreaterEqual(flow["duration"], 0)
+        self.assertEqual(flow["query"], [("a", "1"), ("a", "2"), ("empty", "")])
+        self.assertEqual(flow["request"]["form"], [("field", "hello world"), ("field", "again")])
+        self.assertIn("HTTP/1.1 200 OK", detail_lines(flow))
+
     def tls_origin(self, hostname="localhost"):
         cert, key = self.proxy.ca.generate_cert_files(hostname)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
