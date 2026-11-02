@@ -77,7 +77,7 @@ class ProxyTests(unittest.TestCase):
         self.assertIn("hello world", self.log.getvalue())
 
     def test_flow_capture_and_filtering(self):
-        from flow_viewer import FlowStore, detail_lines
+        from client.flow_viewer import FlowStore, detail_lines
         self.proxy.flow_store = FlowStore()
         conn = self.connection()
         for host in ("localhost", "127.0.0.1"):

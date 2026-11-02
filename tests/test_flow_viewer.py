@@ -3,7 +3,7 @@ import gzip
 from types import SimpleNamespace
 import unittest
 
-from flow_viewer import FlowStore, decode_body, detail_lines
+from client.flow_viewer import FlowStore, decode_body, detail_lines
 
 
 class FlowStoreTests(unittest.TestCase):
