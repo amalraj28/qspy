@@ -1,127 +1,281 @@
-# Custom MITM proxy
+# Custom MITM Proxy for Quantum Job Monitoring
 
-A small Python HTTP/1.1 debugging proxy. Requests and responses for exact hostnames
-in `TARGET_DOMAINS` in `main.py` are printed with headers and bodies. Other HTTP
-traffic is forwarded without traffic logs; other HTTPS traffic uses an opaque
-CONNECT tunnel. Host matching ignores case and trailing dots; add subdomains
-explicitly.
+A lightweight Python HTTP/1.1 man-in-the-middle (MITM) proxy for monitoring Quantum job submissions and results.
 
-## Run
+The proxy intercepts HTTPS traffic for configured target domains, extracts quantum job metadata, and forwards relevant information to a central monitoring server (C2). Traffic to non-target HTTPS domains is forwarded through opaque CONNECT tunnels without inspecting its contents.
 
-With Python 3.14 and uv installed:
+The implementation uses Python's standard library for proxy networking, `cryptography` for TLS certificate generation, and `PyJWT` for extracting identity claims. It does not depend on mitmproxy.
 
-```sh
+## Features
+
+- Selective HTTP/HTTPS interception based on configured domains.
+- Transparent forwarding of non-target HTTPS traffic through CONNECT tunnels.
+- Detection of Quantum job submission requests and responses.
+- Extraction of job IDs, backend names, shot counts, and available user identity information.
+- Detection and capture of Quantum job results.
+- Forwarding of captured job metadata and results to a C2 monitoring server.
+- Conditional gzip and deflate decompression for response inspection.
+- Preservation of original response bytes when forwarding traffic to clients.
+- Automatic generation of a local certificate authority and per-host TLS certificates.
+- Optional plaintext traffic logging.
+- Concurrent request handling using a threaded HTTP server.
+
+## Architecture
+
+The system consists of three main components:
+
+1. **Client:** A quantum application or Qiskit program configured to use the proxy.
+2. **Custom MITM Proxy:** Intercepts configured domains, monitors quantum jobs, and forwards traffic to its destination.
+3. **C2 Monitoring Server:** Receives captured job information through an HTTP API and makes it available to the monitoring dashboard.
+
+```text
+                  Quantum Client
+                        |
+                        v
+                 Custom MITM Proxy
+                        |
+            +-----------+-----------+
+            |                       |
+      Target Domains          Other Domains
+            |                       |
+            v                       v
+      Inspect Traffic        Forward Traffic
+            |                 Without Inspection
+            |
+      Extract Job Data
+            |
+            v
+      C2 Monitoring Server
+            |
+            v
+       Web Dashboard
+```
+
+The proxy forwards intercepted requests to the original upstream server. Monitoring is performed alongside normal request processing.
+
+## Installation
+
+### Requirements
+
+- Python 3.14
+- `uv` or another Python package manager
+- Dependencies declared in `pyproject.toml`
+- A running C2 server for centralized monitoring
+
+Install dependencies:
+
+```bash
 uv sync
-uv run python main.py
 ```
 
-The default listener is `127.0.0.1:8888`. Override targets or write a log file:
+Alternatively, install the required Python dependencies into your environment using your preferred package manager.
 
-```sh
-uv run python main.py --target example.com --target api.example.com --log-file traffic.log
+## Configuration
+
+The proxy configuration is defined near the beginning of `custom_proxy.py`.
+
+### Target domains
+
+The proxy includes a list of domains to monitor. Any traffic to the listed domains are intercepted, while others are passed through. Domain matching is case-insensitive and supports subdomains of configured domains.
+
+You can override the proxy's interception targets using the `--target` argument.
+
+### C2 server configuration
+
+The proxy reads its monitoring server configuration from environment variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `C2_SERVER_IP` | `127.0.0.1` | C2 server hostname or IP address |
+| `C2_SERVER_PORT` | `5000` | C2 server port |
+
+The monitoring endpoint is:
+
+```text
+http://<C2_SERVER_IP>:<C2_SERVER_PORT>/api/log
 ```
 
-Alternatively install the dependencies in `pyproject.toml` into your environment
-and run `python main.py`. The implementation uses the standard library for proxy
-networking and `cryptography` for certificates; it does not use mitmproxy.
+On startup, the proxy attempts to contact the C2 server's `/health` endpoint and reports whether it is reachable.
 
-## Interactive traffic inspector
+If the C2 server is unavailable, the proxy can still forward traffic, but captured monitoring data may fail to reach the dashboard.
 
-Run in Windows Terminal, PowerShell, Command Prompt, or a Linux/macOS terminal:
+## Running the Proxy
 
-```sh
-uv sync
+Start the proxy using:
+
+```bash
+uv run python custom_proxy.py
 ```
 
-On Windows, this installs `windows-curses` automatically. Linux and macOS use
-Python's built-in `curses` module. Start the inspector in an interactive terminal:
+The default listener is:
 
-```sh
-uv run python main.py --interactive --target example.com --log-file traffic.log
+```text
+127.0.0.1:8888
 ```
 
-The live list pairs each request with its response, showing method, URL, status,
-response size, and elapsed time. Pending requests and failures appear in the list.
-Use Up/Down to select a flow and Enter to inspect request and response headers,
-query arguments, URL-encoded form fields, and decoded bodies. JSON is indented.
-Repeated arguments and headers are preserved. Use Up/Down or Page Up/Page Down to
-scroll, Left/Right to pan long lines, Esc or `b` to return, and `q` to stop the proxy.
+To use a different port:
 
-Only configured target domains are captured. The latest 500 flows are retained in
-memory for this session. `--log-file` keeps the full plaintext traffic log while
-the terminal shows the inspector. Without `--interactive`, logging works as before.
-Multipart form bodies are shown as text rather than parsed fields.
-
-## Trust the proxy CA
-
-On first startup the proxy creates `.proxy-certs/ca.crt` and its private key.
-Configure your HTTP client to trust that certificate. Older CA files without key
-identifier extensions are upgraded automatically on startup; reimport the updated
-`ca.crt` if you previously installed it in a browser or system trust store. The CA persists across
-restarts, and leaf certificates are generated separately per hostname.
-
-For curl (run after starting the proxy):
-
-```sh
-curl --proxy http://127.0.0.1:8888 --cacert .proxy-certs/ca.crt https://example.com/
-curl --proxy http://127.0.0.1:8888 http://example.com/
+```bash
+uv run python custom_proxy.py --port 8080
 ```
 
-For requests:
+To specify interception targets:
 
-```python
-import requests
-
-response = requests.get(
-    "https://example.com/",
-    proxies={"http": "http://127.0.0.1:8888", "https": "http://127.0.0.1:8888"},
-    verify=".proxy-certs/ca.crt",
-    timeout=30,
-)
-print(response.status_code)
+```bash
+uv run python custom_proxy.py \
+  --target custom_domain \
 ```
 
-A browser needs the CA imported into its trusted authorities and its HTTP/HTTPS
-proxy set to the listener. Certificate-pinned clients may reject interception.
-For a mix of intercepted and pass-through destinations, the client's trust store
-must include both this CA and the usual public roots. Upstream server certificates
-are always verified against platform roots plus Requests' public CA bundle.
-If a private server or your network uses a corporate certificate issuer, supply
-its trusted PEM CA bundle explicitly:
+To write proxy logs to a file:
 
-```sh
-uv run python main.py --upstream-ca corporate-ca.pem
+```bash
+uv run python custom_proxy.py --log-file traffic.log
 ```
 
-This option configures the proxy-to-server connection. `.proxy-certs/ca.crt`
-configures trust for the separate client-to-proxy connection.
+The available command-line options are:
 
-Keep the CA private key private. Logs contain full headers and bodies, including
-credentials when present. Only trust this CA on clients you intend to debug.
-`--cert-dir` selects another certificate directory; do not run multiple proxy
-processes against the same directory during initial CA creation.
+| Option | Description |
+|---|---|
+| `--host` | Proxy listening address |
+| `--port` | Proxy listening port |
+| `--target` | Domain to intercept; repeatable |
+| `--cert-dir` | Directory for proxy CA certificates |
+| `--upstream-ca` | Additional PEM CA bundle for upstream TLS verification |
+| `--log-file` | Save plaintext traffic logs to a file |
 
-## Behavior and limits
+## Trusting the Proxy Certificate
 
-- Supports HTTP and HTTP/1.1 over HTTPS, common methods, keep-alive, request
-  bodies, chunked transfer framing, and concurrent connections.
-- Logs complete messages atomically. Gzip and deflate bodies are decompressed
-  for display, then decoded using the declared charset (UTF-8 by default).
-  Forwarded body content stays unchanged; chunked messages are reframed with a
-  Content-Length. Binary data may display replacement characters.
-- Advertises gzip/deflate upstream to keep textual responses readable.
-- Buffers complete requests/responses in memory. Large downloads consume memory;
-  indefinite streams such as SSE are unsuitable. Idle/network timeout is 30 seconds.
-- HTTP/2, HTTP/3, WebSockets, protocol upgrades, and transparent OS interception
-  are not implemented. Clients must explicitly use the proxy.
-- Default binding is local. There is no proxy authentication.
+The proxy generates a local certificate authority (CA) when its certificate directory is initialized.
 
-## Tests
+By default, the certificate directory is:
 
-```sh
-python -m unittest discover -s tests -v
+```text
+~/.custom-proxy/
 ```
 
-Tests use local HTTP/TLS origins and verify plaintext logging, domain filtering,
-chunked bodies, persistent HTTPS connections, CA persistence, opaque TLS tunnels,
-and upstream certificate verification. No external sites are required.
+It contains the CA certificate and private key.
+
+Clients must trust the generated CA certificate to establish intercepted HTTPS connections.
+
+### Upstream certificate verification
+
+The proxy verifies upstream TLS certificates using trusted CA roots.
+
+For environments using a private or corporate certificate authority, supply an additional trusted CA bundle:
+
+```bash
+uv run python custom_proxy.py --upstream-ca corporate-ca.pem
+```
+
+This configures the proxy-to-server TLS connection, not the client-to-proxy connection.
+
+## Quantum Job Monitoring
+
+The proxy monitors Quantum traffic for two main operations.
+
+### 1. Job submission
+
+A submission is detected when an intercepted request satisfies:
+
+```text
+Method: POST
+Path:   Ends with /jobs
+```
+
+The proxy attempts to extract:
+
+- Username and email from JWT identity claims.
+- Target quantum backend.
+- Number of shots.
+- Original job submission payload.
+- Submission timestamp and detected public IP.
+
+When the corresponding response arrives, the proxy parses its JSON body and extracts the job ID.
+
+The submission metadata is then sent to the C2 server.
+
+JWT claims are decoded for monitoring without cryptographic signature verification. They should not be treated as independently authenticated identity information.
+
+### 2. Job results
+
+The proxy also monitors responses associated with paths containing `/results`.
+
+It attempts to extract:
+
+- Job ID.
+- Response status code.
+- Job results payload.
+- Timestamp and detected public IP.
+- Original request URL.
+
+Results are sent to the C2 server.
+
+The C2 server is responsible for processing these events and associating them with the corresponding job submissions.
+
+## HTTP Response Decompression
+
+The proxy supports conditional decoding of:
+
+- `gzip`
+- `deflate`
+- Uncompressed responses
+
+The `decode_response_body()` function examines the `Content-Encoding` value and returns the decoded content for inspection.
+
+The decoding process is centralized in the request-forwarding logic.
+
+```text
+Upstream Response
+       |
+       v
+Read Original Body
+       |
+       +------------------------+
+       |                        |
+       v                        v
+Decode for Inspection    Preserve Original Body
+       |                        |
+       v                        v
+Parse Job Metadata       Forward to Client
+       |
+       v
+Send to C2
+```
+
+If decompression fails or the encoding is unsupported, the proxy logs a warning and skips response inspection while retaining the original response for forwarding.
+
+## Traffic Logging
+
+For configured target domains, the proxy logs HTTP request and response information, including:
+
+- Request method and URL.
+- HTTP headers.
+- Request bodies.
+- Response status.
+- Response headers.
+- Decoded response content when supported.
+
+Response bodies displayed in the logs are truncated to 2,000 characters.
+
+Non-target HTTPS traffic is forwarded without application-layer inspection.
+
+To save logs:
+
+```bash
+uv run python custom_proxy.py --log-file traffic.log
+```
+
+## Testing
+
+After starting the proxy and C2 server:
+
+1. Configure the quantum client to use the proxy and trust its CA.
+2. Submit a new Quantum job.
+3. Verify that job submission detection appears in the proxy logs.
+4. Confirm that the job ID is extracted from the submission response.
+5. Confirm that the C2 server receives the submission metadata.
+6. Retrieve the job results and verify that the results event is captured.
+7. Check that the monitoring dashboard associates the results with the correct job.
+8. Verify that unrelated HTTPS traffic continues to work through the proxy.
+
+Also test both compressed and uncompressed HTTP responses to confirm that conditional decompression works correctly.
