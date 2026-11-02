@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 C2 Server for IBM Quantum Traffic Monitoring
-Decodes raw data server-side (qiskit required here, not on client!)
 """
 from flask import Flask, render_template, jsonify, request
 from datetime import datetime
@@ -179,14 +178,22 @@ class QuantumCircuitDecoder:
 
     def _extract_circuit_info(self):
         """Extract circuit information using qiskit"""
-        gate_counts = {}
-
         if not self.circuit:
             raise ValueError("Circuit object is None")
+
+        gate_counts = {}
+        active_qubits = set()
+        active_clbits = set()
 
         for instruction in self.circuit.data:
             gate_name = instruction.operation.name
             gate_counts[gate_name] = gate_counts.get(gate_name, 0) + 1
+
+            for qubit in instruction.qubits:
+                active_qubits.add(self.circuit.find_bit(qubit).index)
+
+            for clbit in instruction.clbits:
+                active_clbits.add(self.circuit.find_bit(clbit).index)
 
         try:
             diagram = str(self.circuit.draw(output='text', fold=-1))
@@ -194,8 +201,8 @@ class QuantumCircuitDecoder:
             diagram = "Circuit diagram unavailable"
 
         return {
-            'num_qubits': self.circuit.num_qubits,
-            'num_clbits': self.circuit.num_clbits,
+            'num_qubits': len(active_qubits),
+            'num_clbits': len(active_clbits),
             'circuit_depth': self.circuit.depth(),
             'num_gates': len(self.circuit.data),
             'gate_breakdown': gate_counts,

