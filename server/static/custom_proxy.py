@@ -12,6 +12,7 @@ import ipaddress
 import json
 import logging
 import os
+import gzip
 import re
 import select
 import socket
@@ -337,12 +338,18 @@ class TrafficCapture:
     def is_target(self, host: str) -> bool:
         host = host.lower().rstrip(".")
         return any(
-            host == d.lower().rstrip(".")
-            or host.endswith("." + d.lower().rstrip("."))
+            host == d.lower().rstrip(".") or host.endswith("." + d.lower().rstrip("."))
             for d in TARGET_DOMAINS
-    )
+        )
 
     def on_request(self, method, host, path, headers, body, url) -> Optional[Any]:
+        LOG.info(
+            "CAPTURE CHECK method=%s host=%s path=%s target=%s",
+            method,
+            host,
+            path,
+            self.is_target(host),
+        )
         if not self.is_target(host):
             return None
         path_l = path.lower()
@@ -353,6 +360,14 @@ class TrafficCapture:
         return None
 
     def on_response(self, key, method, host, path, status, response_body, url):
+        LOG.info(
+            "RESPONSE CHECK method=%s host=%s path=%s status=%s bytes=%s",
+            method,
+            host,
+            path,
+            status,
+            len(response_body),
+        )
         if not self.is_target(host):
             return
         path_l = path.lower()
@@ -393,7 +408,7 @@ class TrafficCapture:
                     shots = first[2]
             key = id(body)
             self.pending_jobs[key] = {
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": dt.datetime.now().isoformat(),
                 "client_ip": profile["ip"],
                 "url": url,
                 "method": method,
@@ -438,7 +453,7 @@ class TrafficCapture:
 
     def _handle_results(self, method, host, path, status, response_body, url):
         try:
-            body = json.loads(response_body)
+            body = json.loads(gzip.decompress(response_body))
             job_id = None
             m = re.search(r"/jobs/([^/]+)/results", path)
             if m:
@@ -447,7 +462,7 @@ class TrafficCapture:
                 job_id = body.get("id") or body.get("job_id")
             data = {
                 "type": "job_results_raw",
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": dt.datetime.now().isoformat(),
                 "client_ip": self.public_ip,
                 "url": url,
                 "status_code": status,
@@ -530,8 +545,7 @@ class ProxyServer(ThreadingHTTPServer):
     def is_target(self, host: str) -> bool:
         host = normalize_host(host)
         return any(
-            host == domain or host.endswith("." + domain)
-            for domain in self.targets
+            host == domain or host.endswith("." + domain) for domain in self.targets
         )
 
 
@@ -800,10 +814,7 @@ def main():
         action="append",
         help="Exact domain to intercept (repeatable; overrides TARGET_DOMAINS)",
     )
-    parser.add_argument(
-        "--cert-dir",
-        default=str(Path.home() / ".custom-proxy")
-    )
+    parser.add_argument("--cert-dir", default=str(Path.home() / ".custom-proxy"))
     parser.add_argument(
         "--upstream-ca",
         help="Additional PEM CA bundle for upstream servers",
